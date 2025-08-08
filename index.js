@@ -4,7 +4,7 @@ const express = require('express');
 const { ClerkExpressWithAuth } = require('@clerk/clerk-sdk-node');
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3000;
 
 // Add the Clerk middleware.
 // This will attach user information to the request object.
@@ -16,6 +16,9 @@ app.use(express.json());
 const rideRoutes = require('./routes/rideRoutes');
 app.use('/api/rides', rideRoutes);
 
+app.get('/', (req, res) => {
+  res.send('Hello! Your ridesharing backend is running.');
+});
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
