@@ -1,17 +1,16 @@
-// routes/webhookRoutes.js
+// routes/webhookRoutes.js (Corrected)
 const express = require('express');
 const router = express.Router();
 const { Webhook } = require('svix');
-const User = require('../models/User'); // Your User model
+const User = require('../models/User');
 
-// Use express.raw() to access the raw body for signature verification
+// This special middleware gets the raw body, which svix needs
 router.post('/clerk', express.raw({ type: 'application/json' }), async (req, res) => {
     const WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SIGNING_SECRET;
     if (!WEBHOOK_SECRET) {
         return res.status(400).send('Webhook secret not configured.');
     }
 
-    // Get the headers
     const svix_id = req.headers["svix-id"];
     const svix_timestamp = req.headers["svix-timestamp"];
     const svix_signature = req.headers["svix-signature"];
@@ -20,8 +19,9 @@ router.post('/clerk', express.raw({ type: 'application/json' }), async (req, res
         return res.status(400).json({ error: 'Error occurred -- no svix headers' });
     }
 
-    const payload = req.body;
-    const body = JSON.stringify(payload);
+    // req.body is now a raw buffer, which is what `svix` needs.
+    // DO NOT stringify it.
+    const body = req.body; 
     const wh = new Webhook(WEBHOOK_SECRET);
 
     let evt;
