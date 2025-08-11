@@ -3,26 +3,28 @@ const User = require('../models/User');
 const Driver = require('../models/Driver'); // Import the Driver model
 
 exports.requestRide = async (req, res) => {
+    console.log('[DEBUG] 1. Entered requestRide function.');
+
     const clerkId = req.auth.userId;
-    
-    // Destructure from the request body
     const { pickupLocation, destination } = req.body;
 
-    // --- ADD THIS VALIDATION BLOCK ---
     if (!pickupLocation || !pickupLocation.longitude || !pickupLocation.latitude) {
-        return res.status(400).json({ 
-            message: "Invalid or missing 'pickupLocation' in the request body. It must be an object with 'longitude' and 'latitude' properties." 
-        });
+        console.log('[DEBUG] FAILED at validation. Missing pickupLocation.');
+        return res.status(400).json({ message: "Invalid or missing pickupLocation." });
     }
-    // --- END VALIDATION BLOCK ---
+    
+    console.log('[DEBUG] 2. Validation passed. Pickup location:', pickupLocation);
 
     try {
         const user = await User.findOne({ clerkId });
         if (!user) {
+            console.log('[DEBUG] FAILED: User not found in DB.');
             return res.status(404).json({ message: 'User not found.' });
         }
 
-        // The rest of your code remains the same...
+        console.log('[DEBUG] 3. Found user in database:', user._id);
+        console.log('[DEBUG] 4. Starting search for nearby drivers...');
+
         const nearbyDrivers = await Driver.find({
             currentLocation: {
                 $near: {
@@ -30,17 +32,39 @@ exports.requestRide = async (req, res) => {
                         type: "Point",
                         coordinates: [pickupLocation.longitude, pickupLocation.latitude]
                     },
-                    $maxDistance: 5000 
+                    $maxDistance: 5000 // 5 kilometers
                 }
             },
             isAvailable: true
         });
 
-        // ... etc.
+        console.log(`[DEBUG] 5. Database query finished. Found ${nearbyDrivers.length} drivers.`);
+
+        if (nearbyDrivers.length === 0) {
+            console.log('[DEBUG] FAILED: No available drivers found.');
+            return res.status(404).json({ message: 'No available drivers found near you.' });
+        }
+
+        console.log('[DEBUG] 6. Creating new ride document...');
+        const newRide = new Ride({
+            user: user._id,
+            pickupLocation,
+            destination,
+            status: 'searching',
+        });
+        await newRide.save();
+
+        console.log('[DEBUG] 7. Saved new ride to database:', newRide._id);
+        console.log('[DEBUG] 8. Emitting socket event and sending response...');
+        
+        req.io.to('available-drivers').emit('new-ride-request', newRide);
+        
+        res.status(201).json(newRide);
+        console.log('[DEBUG] 9. Response sent successfully!');
 
     } catch (error) {
-        console.error('Error creating ride request:', error);
-        res.status(500).json({ message: 'Server error.' });
+        console.error('[DEBUG] CRITICAL ERROR in try/catch block:', error);
+        res.status(500).json({ message: 'Server error.', error: error.message });
     }
 };
 

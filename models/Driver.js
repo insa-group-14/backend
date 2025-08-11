@@ -1,10 +1,11 @@
+// models/Driver.js
+
 const mongoose = require('mongoose');
 
 const DriverSchema = new mongoose.Schema({
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     vehicleDetails: { type: String },
     isAvailable: { type: Boolean, default: false },
-    // GeoJSON format for location
     currentLocation: {
         type: {
             type: String,
@@ -16,7 +17,6 @@ const DriverSchema = new mongoose.Schema({
             default: [0, 0]
         }
     },
-    // ... other fields
 });
 
 // IMPORTANT: Create the geospatial index
