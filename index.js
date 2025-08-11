@@ -1,35 +1,38 @@
-// index.js (Corrected)
+// index.js
 require('dotenv').config();
 const express = require('express');
 const { ClerkExpressWithAuth } = require('@clerk/clerk-sdk-node');
 const connectDB = require('./config/db');
 
+// Connect to Database
 connectDB();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Import your route files
-const rideRoutes = require('./routes/rideRoutes');
+// Import route files
 const webhookRoutes = require('./routes/webhookRoutes');
+const rideRoutes = require('./routes/rideRoutes');
+const userRoutes = require('./routes/userRoutes');
 
 // --- MIDDLEWARE & ROUTES ---
 
-// Test route for the root URL
 app.get('/', (req, res) => {
   res.send('Hello! Your ridesharing backend is running.');
 });
 
-// Use the webhook router WITHOUT the global json parser.
-// The raw body parser is already inside webhookRoutes.js
-app.use('/api/webhooks', webhookRoutes);
+// 1. Public webhook routes (needs raw body, so no global express.json() yet)
+app.use('/api/webhooks/clerk', webhookRoutes);
 
-// The Clerk middleware should come after public routes like webhooks.
+// 2. Global JSON parser for all other routes
+app.use(express.json());
+
+// 3. Clerk authentication middleware to protect subsequent routes
 app.use(ClerkExpressWithAuth());
 
-// Now, for all routes that need a JSON body (like creating a ride),
-// you can apply the middleware directly to that router.
-app.use('/api/rides', express.json(), rideRoutes);
+// 4. Your protected application routes
+app.use('/api/rides', rideRoutes);
+app.use('/api/users', userRoutes);
 
 
 app.listen(PORT, () => {

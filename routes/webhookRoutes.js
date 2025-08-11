@@ -5,7 +5,7 @@ const { Webhook } = require('svix');
 const User = require('../models/User');
 
 // Use express.raw() to access the raw body for signature verification
-router.post('/clerk', express.raw({ type: 'application/json' }), async (req, res) => {
+router.post('/', express.raw({ type: 'application/json' }), async (req, res) => {
     const WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SIGNING_SECRET;
     if (!WEBHOOK_SECRET) {
         console.error('Clerk webhook secret not configured.');
@@ -22,7 +22,7 @@ router.post('/clerk', express.raw({ type: 'application/json' }), async (req, res
     }
 
     const payload = req.body;
-    const body = JSON.stringify(payload);
+    const body = payload;
     const wh = new Webhook(WEBHOOK_SECRET);
 
     let evt;

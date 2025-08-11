@@ -2,22 +2,17 @@
 const express = require('express');
 const router = express.Router();
 const { ClerkExpressRequireAuth } = require('@clerk/clerk-sdk-node');
+const rideController = require('../controllers/rideController');
 
-// This route is now protected.
-// If a user is not logged in, Clerk will return a 401 Unauthorized error.
-router.post('/request', ClerkExpressRequireAuth(), (req, res) => {
-  // You can access the authenticated user's ID from req.auth
-  const { userId } = req.auth;
+// All routes in this file will be protected and require a logged-in user.
+router.use(ClerkExpressRequireAuth());
 
-  console.log(`User ${userId} is requesting a ride.`);
+// POST /api/rides/request - The route is now handled by the controller
+router.post('/request', rideController.requestRide);
 
-  // Your logic to create a ride request...
-  res.json({ message: `Ride requested by user ${userId}` });
-});
+// GET /api/rides/prices (can remain public if you move it out of this router)
+// For simplicity, we'll keep it protected for now.
+router.get('/prices', rideController.getPrices);
 
-// This route is public and does not require authentication
-router.get('/prices', (req, res) => {
-    res.json({ price_per_km: 1.5 });
-});
 
 module.exports = router;
