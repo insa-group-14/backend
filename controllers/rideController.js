@@ -1,57 +1,184 @@
-// controllers/rideController.js
 const Ride = require('../models/Ride');
 const User = require('../models/User');
+const Driver = require('../models/Driver'); // Import the Driver model
 
-/**
- * @route   POST /api/rides/request
- * @desc    Create a new ride request
- * @access  Private
- */
 exports.requestRide = async (req, res) => {
-    // req.auth.userId is the Clerk user ID, available from the middleware
     const clerkId = req.auth.userId;
-
-    // The frontend should send the pickup and destination coordinates in the body
+    
+    // Destructure from the request body
     const { pickupLocation, destination } = req.body;
 
-    if (!pickupLocation || !destination) {
-        return res.status(400).json({ message: 'Pickup location and destination are required.' });
+    // --- ADD THIS VALIDATION BLOCK ---
+    if (!pickupLocation || !pickupLocation.longitude || !pickupLocation.latitude) {
+        return res.status(400).json({ 
+            message: "Invalid or missing 'pickupLocation' in the request body. It must be an object with 'longitude' and 'latitude' properties." 
+        });
     }
+    // --- END VALIDATION BLOCK ---
 
     try {
-        // Find the user in your database using their Clerk ID
-        const user = await User.findOne({ clerkId: clerkId });
+        const user = await User.findOne({ clerkId });
         if (!user) {
             return res.status(404).json({ message: 'User not found.' });
         }
 
-        // Create a new ride document
-        const newRide = new Ride({
-            user: user._id, // Link to your internal User model's ID
-            pickupLocation,
-            destination,
-            status: 'searching', // Initial status
-            // Fare can be calculated here or later
+        // The rest of your code remains the same...
+        const nearbyDrivers = await Driver.find({
+            currentLocation: {
+                $near: {
+                    $geometry: {
+                        type: "Point",
+                        coordinates: [pickupLocation.longitude, pickupLocation.latitude]
+                    },
+                    $maxDistance: 5000 
+                }
+            },
+            isAvailable: true
         });
 
-        await newRide.save();
-
-        // Respond with the newly created ride object
-        // You'll likely want to use WebSockets here later to notify drivers
-        res.status(201).json(newRide);
+        // ... etc.
 
     } catch (error) {
         console.error('Error creating ride request:', error);
-        res.status(500).json({ message: 'Server error while creating ride request.' });
+        res.status(500).json({ message: 'Server error.' });
     }
 };
 
 /**
- * @route   GET /api/rides/prices
- * @desc    Get the current price per kilometer
- * @access  Public
+ * @desc    Logic for a driver to accept a ride.
+ * @param   {object} io - The Socket.IO server instance.
+ * @param   {object} data - Data from the socket event, should include { rideId, driverId }.
  */
-exports.getPrices = (req, res) => {
-    // This can be made more dynamic later
-    res.json({ price_per_km: 1.50 });
+exports.acceptRide = async (io, data) => {
+    try {
+        const { rideId, driverId } = data;
+
+        // 1. Find the ride and ensure it's still available
+        const ride = await Ride.findById(rideId);
+
+        if (!ride || ride.status !== 'searching') {
+            // Ride is already taken or cancelled
+            console.log(`Ride ${rideId} is no longer available.`);
+            // Optionally, emit a message back to the specific driver who tried to accept it
+            return;
+        }
+
+        // 2. Find the driver and set them to unavailable
+        const driver = await Driver.findByIdAndUpdate(driverId, { isAvailable: false });
+        if (!driver) {
+            console.error(`Driver with ID ${driverId} not found.`);
+            return;
+        }
+
+        // 3. Update the ride with the driver's ID and change status
+        ride.driver = driver._id;
+        ride.status = 'accepted';
+        await ride.save();
+
+        // 4. Populate the driver and user details to send to the rider
+        const acceptedRideDetails = await Ride.findById(rideId)
+            .populate({
+                path: 'driver',
+                populate: {
+                    path: 'user',
+                    select: 'firstName profilePictureUrl' // Send only what's needed
+                }
+            })
+            .populate({
+                path: 'user',
+                select: 'clerkId' // We need this to find the rider's socket
+            });
+
+        // 5. Notify the original rider
+        // This requires mapping a user ID to a socket ID.
+        // A simple (but not perfectly scalable) way is to store it on connection.
+        const riderClerkId = acceptedRideDetails.user.clerkId;
+        
+        // This assumes you have a way to get the rider's socket.
+        // We will improve this mapping in the next step.
+        // For now, let's broadcast to a "room" the rider would be in.
+        io.to(`ride_${rideId}`).emit('ride-accepted', acceptedRideDetails);
+        
+        console.log(`Ride ${rideId} accepted by Driver ${driverId}. Notifying Rider ${riderClerkId}.`);
+
+    } catch (error) {
+        console.error("Error in acceptRide:", error);
+    }
+};
+
+/**
+ * @desc    Handles starting a trip
+ */
+exports.startTrip = async (io, data) => {
+    try {
+        const { rideId } = data;
+        const ride = await Ride.findByIdAndUpdate(
+            rideId,
+            { status: 'in-progress', startTime: new Date() },
+            { new: true }
+        );
+
+        if (ride) {
+            // Notify the rider in the specific ride room
+            io.to(`ride_${rideId}`).emit('trip-started', ride);
+            console.log(`Trip ${rideId} has started.`);
+        }
+    } catch (error) {
+        console.error("Error starting trip:", error);
+    }
+};
+
+/**
+ * @desc    Handles ending a trip
+ */
+exports.endTrip = async (io, data) => {
+    try {
+        const { rideId } = data;
+
+        // Mark the ride as completed
+        const ride = await Ride.findByIdAndUpdate(
+            rideId,
+            { status: 'completed', endTime: new Date() },
+            { new: true }
+        ).populate('driver');
+
+        if (ride) {
+            // Make the driver available for new rides
+            await Driver.findByIdAndUpdate(ride.driver._id, { isAvailable: true });
+
+            // Notify the rider the trip is over
+            io.to(`ride_${rideId}`).emit('trip-completed', ride);
+            console.log(`Trip ${rideId} has ended. Driver ${ride.driver._id} is now available.`);
+        }
+    } catch (error) {
+        console.error("Error ending trip:", error);
+    }
+};
+
+/**
+ * @desc    Handles cancelling a trip
+ */
+exports.cancelTrip = async (io, data) => {
+    try {
+        const { rideId, cancelledBy } = data; // cancelledBy could be 'rider' or 'driver'
+
+        const ride = await Ride.findByIdAndUpdate(
+            rideId,
+            { status: 'cancelled' },
+            { new: true }
+        ).populate('driver');
+
+        if (ride) {
+            // If a driver was assigned, make them available again
+            if (ride.driver) {
+                await Driver.findByIdAndUpdate(ride.driver._id, { isAvailable: true });
+            }
+
+            // Notify everyone in the ride room that it's been cancelled
+            io.to(`ride_${rideId}`).emit('trip-cancelled', { ride, cancelledBy });
+            console.log(`Trip ${rideId} was cancelled by ${cancelledBy}.`);
+        }
+    } catch (error) {
+        console.error("Error cancelling trip:", error);
+    }
 };

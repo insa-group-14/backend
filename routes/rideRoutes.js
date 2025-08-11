@@ -12,7 +12,7 @@ router.post('/request', rideController.requestRide);
 
 // GET /api/rides/prices (can remain public if you move it out of this router)
 // For simplicity, we'll keep it protected for now.
-router.get('/prices', rideController.getPrices);
+// router.get('/prices', rideController.getPrices);
 
 
 module.exports = router;

@@ -4,11 +4,27 @@ const express = require('express');
 const { ClerkExpressWithAuth } = require('@clerk/clerk-sdk-node');
 const connectDB = require('./config/db');
 
-// Connect to Database
+const rideController = require('./controllers/rideController');
+
+// --- Real-time Setup ---
+const http = require('http');
+const { Server } = require("socket.io");
+// --- End Real-time Setup ---
+
 connectDB();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// --- Socket.IO Integration ---
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: "http://localhost:3001", // IMPORTANT: Replace with your frontend's URL
+    methods: ["GET", "POST"]
+  }
+});
+// --- End Socket.IO Integration ---
 
 // Import route files
 const webhookRoutes = require('./routes/webhookRoutes');
@@ -16,25 +32,63 @@ const rideRoutes = require('./routes/rideRoutes');
 const userRoutes = require('./routes/userRoutes');
 
 // --- MIDDLEWARE & ROUTES ---
-
 app.get('/', (req, res) => {
   res.send('Hello! Your ridesharing backend is running.');
 });
-
-// 1. Public webhook routes (needs raw body, so no global express.json() yet)
-app.use('/api/webhooks/clerk', webhookRoutes);
-
-// 2. Global JSON parser for all other routes
+app.use('/api/webhooks', webhookRoutes);
 app.use(express.json());
-
-// 3. Clerk authentication middleware to protect subsequent routes
 app.use(ClerkExpressWithAuth());
-
-// 4. Your protected application routes
 app.use('/api/rides', rideRoutes);
 app.use('/api/users', userRoutes);
 
+// --- Socket.IO Connection Logic ---
+io.on('connection', (socket) => {
+  console.log('A user connected:', socket.id);
 
-app.listen(PORT, () => {
+  // --- ROOMS ---
+  socket.on('join-ride-room', (rideId) => {
+      socket.join(`ride_${rideId}`);
+      console.log(`Socket ${socket.id} joined room for ride ${rideId}`);
+  });
+
+  // --- LOCATION ---
+  socket.on('update-location', async (data) => {
+    const { driverId, location, rideId } = data; // driver's app should also send rideId
+    await Driver.findByIdAndUpdate(driverId, {
+        currentLocation: {
+            type: 'Point',
+            coordinates: [location.longitude, location.latitude]
+        }
+    });
+    // Now broadcast to the specific ride room
+    io.to(`ride_${rideId}`).emit('driver-location-updated', { driverId, location });
+  });
+
+  // --- LIFECYCLE EVENTS ---
+  socket.on('accept-ride', (data) => {
+    rideController.acceptRide(io, data);
+  });
+
+  socket.on('start-trip', (data) => {
+    rideController.startTrip(io, data);
+  });
+
+  socket.on('end-trip', (data) => {
+    rideController.endTrip(io, data);
+  });
+
+  socket.on('cancel-trip', (data) => {
+    rideController.cancelTrip(io, data);
+  });
+
+  socket.on('disconnect', () => {
+    console.log('User disconnected:', socket.id);
+  });
+});
+// --- End Socket.IO Connection Logic ---
+
+
+// IMPORTANT: Use `server.listen` instead of `app.listen`
+server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
