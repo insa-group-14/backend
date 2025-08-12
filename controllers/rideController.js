@@ -131,7 +131,7 @@ exports.acceptRide = async (io, data) => {
 };
 
 /**
- * @desc    Handles starting a trip
+ * @desc    Handles a driver starting a trip
  */
 exports.startTrip = async (io, data) => {
     try {
@@ -145,7 +145,7 @@ exports.startTrip = async (io, data) => {
         if (ride) {
             // Notify the rider in the specific ride room
             io.to(`ride_${rideId}`).emit('trip-started', ride);
-            console.log(`Trip ${rideId} has started.`);
+            console.log(`Trip ${rideId} has officially started.`);
         }
     } catch (error) {
         console.error("Error starting trip:", error);
@@ -153,20 +153,19 @@ exports.startTrip = async (io, data) => {
 };
 
 /**
- * @desc    Handles ending a trip
+ * @desc    Handles a driver ending a trip
  */
 exports.endTrip = async (io, data) => {
     try {
         const { rideId } = data;
 
-        // Mark the ride as completed
         const ride = await Ride.findByIdAndUpdate(
             rideId,
             { status: 'completed', endTime: new Date() },
             { new: true }
         ).populate('driver');
 
-        if (ride) {
+        if (ride && ride.driver) {
             // Make the driver available for new rides
             await Driver.findByIdAndUpdate(ride.driver._id, { isAvailable: true });
 
