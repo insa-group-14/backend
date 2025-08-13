@@ -16,9 +16,7 @@ const RIDE_REQUEST_PAYLOAD = JSON.stringify({
 // --- END CONFIGURATION ---
 
 const createRideRequest = (rideIdListener) => {
-    // This is now passed in from the rider's socket setup
-    console.log("--- Step 2: Rider is requesting a ride via HTTP POST... ---");
-    // ... (rest of the function is the same as before)
+    console.log(`--- Step 2: Rider is requesting a '${JSON.parse(RIDE_REQUEST_PAYLOAD).rideType}' ride via HTTP POST... ---`);
     const options = {
         hostname: 'localhost', port: 3000, path: '/api/rides/request', method: 'POST',
         headers: {
@@ -36,7 +34,7 @@ const createRideRequest = (rideIdListener) => {
             }
             console.log("--- Step 2 Success: Ride created successfully. ---");
             const newRide = JSON.parse(data);
-            rideIdListener(newRide._id); // Pass the ID back to the rider's scope
+            rideIdListener(newRide._id);
         });
     });
     req.on('error', (e) => console.error("Request Error:", e));
