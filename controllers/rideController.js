@@ -6,13 +6,18 @@ exports.requestRide = async (req, res) => {
     console.log('[DEBUG] 1. Entered requestRide function.');
 
     const clerkId = req.auth.userId;
-    const { pickupLocation, destination } = req.body;
+    const { pickupLocation, destination, rideType } = req.body;
 
     if (!pickupLocation || !pickupLocation.longitude || !pickupLocation.latitude) {
         console.log('[DEBUG] FAILED at validation. Missing pickupLocation.');
         return res.status(400).json({ message: "Invalid or missing pickupLocation." });
     }
     
+    if (!rideType || !['private', 'shared'].includes(rideType)) {
+        console.log('[DEBUG] FAILED at validation. Missing or invalid rideType.');
+        return res.status(400).json({ message: "Invalid or missing rideType." });
+    }
+
     console.log('[DEBUG] 2. Validation passed. Pickup location:', pickupLocation);
 
     try {
@@ -51,6 +56,7 @@ exports.requestRide = async (req, res) => {
             pickupLocation,
             destination,
             status: 'searching',
+            rideType: rideType,
         });
         await newRide.save();
 

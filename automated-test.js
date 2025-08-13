@@ -6,10 +6,13 @@ const SERVER_URL = "http://localhost:3000";
 const MOCK_DRIVER_ID = "689a2c51919dd84fd2a39eb8"; // Use your actual driver ID
 const CLERK_AUTH_TOKEN = "eyJhbGciOiJSUzI1NiIsImNhdCI6ImNsX0I3ZDRQRDIyMkFBQSIsImtpZCI6Imluc18zMHpmREdxNFlIZWhJcTRibUJHb3QwbkxEdngiLCJ0eXAiOiJKV1QifQ.eyJhenAiOiJodHRwOi8vbG9jYWxob3N0OjMwMDEiLCJleHAiOjE3NTgwNDkxMDMsImlhdCI6MTc1NDg5NTUwMywiaXNzIjoiaHR0cHM6Ly9ldGhpY2FsLWdydWItNTUuY2xlcmsuYWNjb3VudHMuZGV2IiwianRpIjoiMmNjN2NhZGViYzJiODQzNDZkY2MiLCJuYmYiOjE3NTQ4OTU0OTgsInN1YiI6InVzZXJfMzE4QU1MbER2elYwRzRUd2FwUXJMOERTYWtQIn0.HzEmefIj89Llzs78LNhhzPPH1zkE9mBhfjnp9p_Bw2Axdk8MuZBEPufkxAfxB338xTlNbSI1rC0zv6GjNV6ElADG1k9PdsqKZtGxJB4CTUkePF6JYPSYlSSdQfBAh_0i5YbDogtpuFKaA-Dkn_RATEyUop0ezvgYrDMjTr80xhFSxOzEsf3uTNh2xH0x76TZ_CIzeDnCCwPGzDUzQNPtuXvHJK0RVpzYrvfMxHc4H2Z4gLCjTnryKZm0W-7SgAYJdJIvpZjEhC64-lklH2dfI4vt1k4MfBB9GFRGUw5NJJZ1J427rMsIjmlYDwYlZzxgBaEoV8tC8GPLsXAJeIko4g"; // ❗️ Get a fresh token
 
+
 const RIDE_REQUEST_PAYLOAD = JSON.stringify({
     "pickupLocation": { "longitude": 38.7630, "latitude": 9.0050 },
-    "destination": { "longitude": 38.7800, "latitude": 9.0100 }
+    "destination": { "longitude": 38.7800, "latitude": 9.0100 },
+    "rideType": "shared"
 });
+
 // --- END CONFIGURATION ---
 
 const createRideRequest = (rideIdListener) => {

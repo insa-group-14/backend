@@ -7,6 +7,12 @@ const RideSchema = new mongoose.Schema({
     destination: { type: Object, required: true },
     status: { type: String, enum: ['searching', 'accepted', 'in-progress', 'completed', 'cancelled'], default: 'searching' },
     fare: { type: Number },
+    rideType: {
+        type: String,
+        enum: ['private', 'shared'],
+        required: true,
+        default: 'private'
+    },
     // ... other fields
 });
 
