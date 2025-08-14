@@ -2,6 +2,7 @@
 const Ride = require('../models/Ride');
 const User = require('../models/User');
 const Driver = require('../models/Driver');
+const { calculateFare } = require('./fareController');
 
 const mbxDirections = require('@mapbox/mapbox-sdk/services/directions');
 const MAPBOX_ACCESS_TOKEN = process.env.MAPBOX_ACCESS_TOKEN; // Store your token in .env
@@ -182,21 +183,42 @@ exports.endTrip = async (io, data) => {
     try {
         const { rideId } = data;
 
+        // Get the ride details before updating
+        const rideToComplete = await Ride.findById(rideId);
+        if (!rideToComplete) return;
+
+        // --- FARE CALCULATION LOGIC ---
+        const directionsResponse = await directionsClient.getDirections({
+            profile: 'driving-traffic',
+            waypoints: [
+                { coordinates: [rideToComplete.pickupLocation.longitude, rideToComplete.pickupLocation.latitude] },
+                { coordinates: [rideToComplete.destination.longitude, rideToComplete.destination.latitude] }
+            ]
+        }).send();
+        
+        const route = directionsResponse.body.routes[0];
+        const finalFare = calculateFare(route.distance, route.duration, rideToComplete.rideType);
+        // --- END OF FARE CALCULATION ---
+
         const ride = await Ride.findByIdAndUpdate(
             rideId,
-            { status: 'completed', endTime: new Date() },
+            { 
+                status: 'completed', 
+                endTime: new Date(),
+                fare: finalFare.toFixed(2) // Save the calculated fare
+            },
             { new: true }
         ).populate('driver');
 
         if (ride && ride.driver) {
-            // Remove the completed ride from the driver's queue
+            
             const driver = await Driver.findByIdAndUpdate(
                 ride.driver._id,
                 { $pull: { rideQueue: rideId } },
                 { new: true }
             );
 
-            // If their queue is now empty, they become inactive and available
+            
             if (driver && driver.rideQueue.length === 0) {
                 driver.rideStatus = 'inactive';
                 await driver.save();
@@ -204,11 +226,10 @@ exports.endTrip = async (io, data) => {
             }
 
             io.to(`ride_${rideId}`).emit('trip-completed', ride);
-            console.log(`Trip ${rideId} has ended.`);
+            console.log(`Trip ${rideId} has ended. Final Fare: ${ride.fare} ETB`);
         }
     } catch (error) {
         console.error("Error ending trip:", error);
     }
 };
-
 // ... (startTrip and cancelTrip would also need similar updates to manage the queue/status)
