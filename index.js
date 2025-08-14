@@ -35,7 +35,7 @@ const Driver = require('./models/Driver');
 app.get('/', (req, res) => {
   res.send('Hello! Your ridesharing backend is running.');
 });
-app.use('/api/webhooks', webhookRoutes);
+app.use('/api/webhooks/clerk', webhookRoutes);
 app.use(express.json());
 app.use(ClerkExpressWithAuth());
 

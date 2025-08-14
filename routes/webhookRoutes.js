@@ -58,6 +58,52 @@ router.post('/', express.raw({ type: 'application/json' }), async (req, res) => 
         }
     }
 
+    if (eventType === 'user.deleted') {
+        try {
+            const { id } = evt.data;
+            const deletedUser = await User.findOneAndDelete({ clerkId: id });
+
+            if (deletedUser) {
+                console.log(`User ${deletedUser.firstName} ${deletedUser.lastName} (Clerk ID: ${id}) deleted from database.`);
+            } else {
+                console.warn(`Attempted to delete user with Clerk ID: ${id}, but they were not found in the database.`);
+            }
+        } catch (dbError) {
+            console.error('Error deleting user from DB:', dbError);
+            return res.status(500).json({ error: 'Database error during user deletion' });
+        }
+    }
+    
+if (eventType === 'user.updated') {
+    try {
+        // Destructure all the data you need from the event payload
+        const { id, email_addresses, first_name, last_name, image_url } = evt.data;
+
+        // Find the user by their Clerk ID and update their information
+        const updatedUser = await User.findOneAndUpdate({ clerkId: id },
+            {
+                email: email_addresses[0].email_address,
+                firstName: first_name,
+                lastName: last_name,
+                profilePictureUrl: image_url,
+            },
+            {
+                new: true // This option returns the updated document
+            }
+        )
+
+        if (updatedUser) {
+            console.log(`User ${updatedUser.firstName} ${updatedUser.lastName} (Clerk ID: ${id}) updated in the database.`);
+        } else {
+            console.warn(`Attempted to update user with Clerk ID: ${id}, but they were not found in the database.`);
+        }
+
+    } catch (dbError) {
+        console.error('Error when updating user info:', dbError)
+        return res.status(500).json({ error: 'Database error during updating user info' });
+    }
+}``
+
     // You can also handle 'user.updated' and 'user.deleted' events here
 
     res.status(200).json({ success: true });
