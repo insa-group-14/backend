@@ -73,6 +73,11 @@ async function findCompatibleSharedRides(newRiderPickup, newRiderDestination) {
             { coordinates: driver.currentLocation.coordinates },
             ...driver.rideQueue.map(ride => ({ coordinates: [ride.destination.longitude, ride.destination.latitude] }))
         ];
+
+        // Ensure there are enough waypoints for the API call
+        if (currentWaypoints.length < 2) {
+            continue;
+        }
         
         // 2. Define the waypoints for the new potential route
         const newWaypoints = [
@@ -94,6 +99,7 @@ async function findCompatibleSharedRides(newRiderPickup, newRiderDestination) {
             }).send();
             
             // 4. Await the responses and compare durations
+            // --- FIX: Renamed the second variable to avoid redeclaration ---
             const [currentRouteResponse, newRouteResponse] = await Promise.all([
                 currentRouteRequest,
                 newRouteRequest
@@ -101,6 +107,7 @@ async function findCompatibleSharedRides(newRiderPickup, newRiderDestination) {
 
             const currentDuration = currentRouteResponse.body.routes[0].duration;
             const newDuration = newRouteResponse.body.routes[0].duration;
+            // --- END OF FIX ---
             
             // 5. Check if the delay is acceptable
             const delay = newDuration - currentDuration;
