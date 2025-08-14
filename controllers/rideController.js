@@ -2,13 +2,13 @@
 const Ride = require('../models/Ride');
 const User = require('../models/User');
 const Driver = require('../models/Driver');
-const { calculateFare } = require('./fareController');
+const { calculateFare } = require('./fareController'); 
 
 const mbxDirections = require('@mapbox/mapbox-sdk/services/directions');
-const MAPBOX_ACCESS_TOKEN = process.env.MAPBOX_ACCESS_TOKEN; // Store your token in .env
+const MAPBOX_ACCESS_TOKEN = process.env.MAPBOX_ACCESS_TOKEN;
 const directionsClient = mbxDirections({ accessToken: MAPBOX_ACCESS_TOKEN });
 
-const MAX_DELAY_SECONDS = 300; // 5 minutes
+const MAX_DELAY_SECONDS = 300;
 
 exports.requestRide = async (req, res) => {
     const { pickupLocation, destination, rideType } = req.body;
@@ -51,9 +51,7 @@ exports.requestRide = async (req, res) => {
     }
 };
 
-/**
- * Finds drivers on compatible shared rides using the Mapbox Directions API.
- */
+
 async function findCompatibleSharedRides(newRiderPickup, newRiderDestination) {
     const compatibleDrivers = [];
     const activeSharedDrivers = await Driver.find({
@@ -67,20 +65,18 @@ async function findCompatibleSharedRides(newRiderPickup, newRiderDestination) {
     }).populate('rideQueue');
 
     for (const driver of activeSharedDrivers) {
-        // --- MAPBOX API LOGIC ---
-
-        // 1. Define the waypoints for the current route
+        
         const currentWaypoints = [
             { coordinates: driver.currentLocation.coordinates },
             ...driver.rideQueue.map(ride => ({ coordinates: [ride.destination.longitude, ride.destination.latitude] }))
         ];
 
-        // Ensure there are enough waypoints for the API call
+        
         if (currentWaypoints.length < 2) {
             continue;
         }
         
-        // 2. Define the waypoints for the new potential route
+       
         const newWaypoints = [
             ...currentWaypoints,
             { coordinates: [newRiderPickup.longitude, newRiderPickup.latitude] },
@@ -88,7 +84,7 @@ async function findCompatibleSharedRides(newRiderPickup, newRiderDestination) {
         ];
 
         try {
-            // 3. Create the two requests for the Mapbox Directions API
+            
             const currentRouteRequest = directionsClient.getDirections({
                 profile: 'driving-traffic',
                 waypoints: currentWaypoints
@@ -99,8 +95,6 @@ async function findCompatibleSharedRides(newRiderPickup, newRiderDestination) {
                 waypoints: newWaypoints
             }).send();
             
-            // 4. Await the responses and compare durations
-            // --- FIX: Renamed the second variable to avoid redeclaration ---
             const [currentRouteResponse, newRouteResponse] = await Promise.all([
                 currentRouteRequest,
                 newRouteRequest
@@ -108,9 +102,8 @@ async function findCompatibleSharedRides(newRiderPickup, newRiderDestination) {
 
             const currentDuration = currentRouteResponse.body.routes[0].duration;
             const newDuration = newRouteResponse.body.routes[0].duration;
-            // --- END OF FIX ---
             
-            // 5. Check if the delay is acceptable
+            
             const delay = newDuration - currentDuration;
             if (delay <= MAX_DELAY_SECONDS) {
                 compatibleDrivers.push(driver);
@@ -124,7 +117,7 @@ async function findCompatibleSharedRides(newRiderPickup, newRiderDestination) {
     return compatibleDrivers;
 }
 
-// --- HELPER FUNCTION FOR DRIVER SEARCH ---
+
 async function findInactiveDrivers(location) {
     return Driver.find({
         currentLocation: {
@@ -133,15 +126,15 @@ async function findInactiveDrivers(location) {
                     type: "Point",
                     coordinates: [location.longitude, location.latitude]
                 },
-                $maxDistance: 10000 // Increased radius to 10km for more options
+                $maxDistance: 10000 
             }
         },
-        rideStatus: 'inactive' // Only find drivers who are not on any ride
+        rideStatus: 'inactive' 
     });
 }
 
 
-// --- MODIFIED `acceptRide` FUNCTION ---
+
 exports.acceptRide = async (io, data) => {
     try {
         const { rideId, driverId } = data;
@@ -151,14 +144,12 @@ exports.acceptRide = async (io, data) => {
             return;
         }
         
-        // --- NEW LOGIC ---
         const updateData = {
             rideStatus: ride.rideType === 'private' ? 'on_private_ride' : 'on_shared_ride',
-            $push: { rideQueue: ride._id } // Add the new ride to the driver's queue
+            $push: { rideQueue: ride._id } 
         };
         const driver = await Driver.findByIdAndUpdate(driverId, updateData);
-        // --- END OF NEW LOGIC ---
-
+        
         if (!driver) {
             console.error(`Driver with ID ${driverId} not found.`);
             return;
@@ -168,7 +159,7 @@ exports.acceptRide = async (io, data) => {
         ride.status = 'accepted';
         await ride.save();
 
-        const acceptedRideDetails = await Ride.findById(rideId).populate(/* ... */);
+        const acceptedRideDetails = await Ride.findById(rideId).populate('driver');
         io.to(`ride_${rideId}`).emit('ride-accepted', acceptedRideDetails);
         
         console.log(`Ride ${rideId} (${ride.rideType}) accepted by Driver ${driverId}.`);
@@ -178,16 +169,35 @@ exports.acceptRide = async (io, data) => {
     }
 };
 
-// --- MODIFIED `endTrip` FUNCTION ---
+// --- NEW `startTrip` FUNCTION ---
+exports.startTrip = async (io, data) => {
+    try {
+        const { rideId } = data;
+        const ride = await Ride.findByIdAndUpdate(
+            rideId,
+            { status: 'in-progress', startTime: new Date() },
+            { new: true }
+        );
+
+        if (ride) {
+            io.to(`ride_${rideId}`).emit('trip-started', ride);
+            console.log(`Trip ${rideId} has started.`);
+        }
+    } catch (error) {
+        console.error("Error starting trip:", error);
+    }
+};
+
+
 exports.endTrip = async (io, data) => {
     try {
         const { rideId } = data;
 
-        // Get the ride details before updating
+        
         const rideToComplete = await Ride.findById(rideId);
         if (!rideToComplete) return;
 
-        // --- FARE CALCULATION LOGIC ---
+        
         const directionsResponse = await directionsClient.getDirections({
             profile: 'driving-traffic',
             waypoints: [
@@ -198,14 +208,14 @@ exports.endTrip = async (io, data) => {
         
         const route = directionsResponse.body.routes[0];
         const finalFare = calculateFare(route.distance, route.duration, rideToComplete.rideType);
-        // --- END OF FARE CALCULATION ---
+        
 
         const ride = await Ride.findByIdAndUpdate(
             rideId,
             { 
                 status: 'completed', 
                 endTime: new Date(),
-                fare: finalFare.toFixed(2) // Save the calculated fare
+                fare: finalFare.toFixed(2) 
             },
             { new: true }
         ).populate('driver');
@@ -232,4 +242,37 @@ exports.endTrip = async (io, data) => {
         console.error("Error ending trip:", error);
     }
 };
-// ... (startTrip and cancelTrip would also need similar updates to manage the queue/status)
+
+// --- NEW `cancelTrip` FUNCTION ---
+exports.cancelTrip = async (io, data) => {
+    try {
+        const { rideId, cancelledBy } = data; // cancelledBy can be 'rider' or 'driver'
+
+        const ride = await Ride.findByIdAndUpdate(
+            rideId,
+            { status: 'cancelled' },
+            { new: true }
+        ).populate('driver');
+
+        if (ride) {
+            // If a driver was assigned, update their status
+            if (ride.driver) {
+                const driver = await Driver.findByIdAndUpdate(
+                    ride.driver._id,
+                    { $pull: { rideQueue: rideId } },
+                    { new: true }
+                );
+
+                if (driver && driver.rideQueue.length === 0) {
+                    driver.rideStatus = 'inactive';
+                    await driver.save();
+                }
+            }
+            
+            io.to(`ride_${rideId}`).emit('trip-cancelled', { ride, cancelledBy });
+            console.log(`Trip ${rideId} was cancelled by ${cancelledBy}.`);
+        }
+    } catch (error) {
+        console.error("Error cancelling trip:", error);
+    }
+};
