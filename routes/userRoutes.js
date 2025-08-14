@@ -8,5 +8,6 @@ router.use(ClerkExpressRequireAuth());
 
 router.get('/me', userController.getCurrentUser);
 router.put('/me', userController.updateCurrentUser);
+router.put('/driver/availability', userController.toggleDriverAvailability);
 
 module.exports = router;

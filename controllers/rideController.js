@@ -61,7 +61,8 @@ async function findCompatibleSharedRides(newRiderPickup, newRiderDestination) {
                 $geometry: { type: "Point", coordinates: [newRiderPickup.longitude, newRiderPickup.latitude] },
                 $maxDistance: 5000
             }
-        }
+        },
+        isAvailable: true
     }).populate('rideQueue');
 
     for (const driver of activeSharedDrivers) {
