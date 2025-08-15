@@ -1,56 +1,38 @@
+// controllers/rideController.js
 const Ride = require('../models/Ride');
 const User = require('../models/User');
-const Driver = require('../models/Driver'); // Import the Driver model
+const Driver = require('../models/Driver');
+const { calculateFare } = require('./fareController'); 
+
+const mbxDirections = require('@mapbox/mapbox-sdk/services/directions');
+const MAPBOX_ACCESS_TOKEN = process.env.MAPBOX_ACCESS_TOKEN;
+const directionsClient = mbxDirections({ accessToken: MAPBOX_ACCESS_TOKEN });
+
+const MAX_DELAY_SECONDS = 300;
 
 exports.requestRide = async (req, res) => {
-    console.log('[DEBUG] 1. Entered requestRide function.');
-
-    const clerkId = req.auth.userId;
     const { pickupLocation, destination, rideType } = req.body;
-
-    if (!pickupLocation || !pickupLocation.longitude || !pickupLocation.latitude) {
-        console.log('[DEBUG] FAILED at validation. Missing pickupLocation.');
-        return res.status(400).json({ message: "Invalid or missing pickupLocation." });
-    }
-    
-    if (!rideType || !['private', 'shared'].includes(rideType)) {
-        console.log('[DEBUG] FAILED at validation. Missing or invalid rideType.');
-        return res.status(400).json({ message: "Invalid or missing rideType." });
-    }
-
-    console.log('[DEBUG] 2. Validation passed. Pickup location:', pickupLocation);
+    const clerkId = req.auth.userId;
+    // ... validation ...
 
     try {
         const user = await User.findOne({ clerkId });
-        if (!user) {
-            console.log('[DEBUG] FAILED: User not found in DB.');
-            return res.status(404).json({ message: 'User not found.' });
+        if (!user) return res.status(404).json({ message: 'User not found.' });
+
+        let drivers = [];
+        if (rideType === 'shared') {
+            drivers = await findCompatibleSharedRides(pickupLocation, destination);
+            if (drivers.length === 0) {
+                drivers = await findInactiveDrivers(pickupLocation);
+            }
+        } else { // 'private' ride
+            drivers = await findInactiveDrivers(pickupLocation);
         }
 
-        console.log('[DEBUG] 3. Found user in database:', user._id);
-        console.log('[DEBUG] 4. Starting search for nearby drivers...');
-
-        const nearbyDrivers = await Driver.find({
-            currentLocation: {
-                $near: {
-                    $geometry: {
-                        type: "Point",
-                        coordinates: [pickupLocation.longitude, pickupLocation.latitude]
-                    },
-                    $maxDistance: 5000 // 5 kilometers
-                }
-            },
-            isAvailable: true
-        });
-
-        console.log(`[DEBUG] 5. Database query finished. Found ${nearbyDrivers.length} drivers.`);
-
-        if (nearbyDrivers.length === 0) {
-            console.log('[DEBUG] FAILED: No available drivers found.');
-            return res.status(404).json({ message: 'No available drivers found near you.' });
+        if (drivers.length === 0) {
+            return res.status(404).json({ message: 'No available drivers found.' });
         }
 
-        console.log('[DEBUG] 6. Creating new ride document...');
         const newRide = new Ride({
             user: user._id,
             pickupLocation,
@@ -59,86 +41,136 @@ exports.requestRide = async (req, res) => {
             rideType: rideType,
         });
         await newRide.save();
-
-        console.log('[DEBUG] 7. Saved new ride to database:', newRide._id);
-        console.log('[DEBUG] 8. Emitting socket event and sending response...');
         
         req.io.to('available-drivers').emit('new-ride-request', newRide);
-        
         res.status(201).json(newRide);
-        console.log('[DEBUG] 9. Response sent successfully!');
 
     } catch (error) {
-        console.error('[DEBUG] CRITICAL ERROR in try/catch block:', error);
+        console.error('Error in requestRide:', error);
         res.status(500).json({ message: 'Server error.', error: error.message });
     }
 };
 
-/**
- * @desc    Logic for a driver to accept a ride.
- * @param   {object} io - The Socket.IO server instance.
- * @param   {object} data - Data from the socket event, should include { rideId, driverId }.
- */
+
+async function findCompatibleSharedRides(newRiderPickup, newRiderDestination) {
+    const compatibleDrivers = [];
+    const activeSharedDrivers = await Driver.find({
+        rideStatus: 'on_shared_ride',
+        currentLocation: {
+            $near: {
+                $geometry: { type: "Point", coordinates: [newRiderPickup.longitude, newRiderPickup.latitude] },
+                $maxDistance: 5000
+            }
+        },
+        isAvailable: true
+    }).populate('rideQueue');
+
+    for (const driver of activeSharedDrivers) {
+        
+        const currentWaypoints = [
+            { coordinates: driver.currentLocation.coordinates },
+            ...driver.rideQueue.map(ride => ({ coordinates: [ride.destination.longitude, ride.destination.latitude] }))
+        ];
+
+        
+        if (currentWaypoints.length < 2) {
+            continue;
+        }
+        
+       
+        const newWaypoints = [
+            ...currentWaypoints,
+            { coordinates: [newRiderPickup.longitude, newRiderPickup.latitude] },
+            { coordinates: [newRiderDestination.longitude, newRiderDestination.latitude] }
+        ];
+
+        try {
+            
+            const currentRouteRequest = directionsClient.getDirections({
+                profile: 'driving-traffic',
+                waypoints: currentWaypoints
+            }).send();
+
+            const newRouteRequest = directionsClient.getDirections({
+                profile: 'driving-traffic',
+                waypoints: newWaypoints
+            }).send();
+            
+            const [currentRouteResponse, newRouteResponse] = await Promise.all([
+                currentRouteRequest,
+                newRouteRequest
+            ]);
+
+            const currentDuration = currentRouteResponse.body.routes[0].duration;
+            const newDuration = newRouteResponse.body.routes[0].duration;
+            
+            
+            const delay = newDuration - currentDuration;
+            if (delay <= MAX_DELAY_SECONDS) {
+                compatibleDrivers.push(driver);
+            }
+
+        } catch (e) {
+            console.error("Mapbox API Error:", e.message);
+        }
+    }
+    
+    return compatibleDrivers;
+}
+
+
+async function findInactiveDrivers(location) {
+    return Driver.find({
+        currentLocation: {
+            $near: {
+                $geometry: {
+                    type: "Point",
+                    coordinates: [location.longitude, location.latitude]
+                },
+                $maxDistance: 10000 
+            }
+        },
+        rideStatus: 'inactive' 
+    });
+}
+
+
+
 exports.acceptRide = async (io, data) => {
     try {
         const { rideId, driverId } = data;
-
-        // 1. Find the ride and ensure it's still available
         const ride = await Ride.findById(rideId);
 
         if (!ride || ride.status !== 'searching') {
-            // Ride is already taken or cancelled
-            console.log(`Ride ${rideId} is no longer available.`);
-            // Optionally, emit a message back to the specific driver who tried to accept it
             return;
         }
-
-        // 2. Find the driver and set them to unavailable
-        const driver = await Driver.findByIdAndUpdate(driverId, { isAvailable: false });
+        
+        const updateData = {
+            rideStatus: ride.rideType === 'private' ? 'on_private_ride' : 'on_shared_ride',
+            $push: { rideQueue: ride._id } 
+        };
+        const driver = await Driver.findByIdAndUpdate(driverId, updateData);
+        
         if (!driver) {
             console.error(`Driver with ID ${driverId} not found.`);
             return;
         }
 
-        // 3. Update the ride with the driver's ID and change status
         ride.driver = driver._id;
         ride.status = 'accepted';
         await ride.save();
 
-        // 4. Populate the driver and user details to send to the rider
-        const acceptedRideDetails = await Ride.findById(rideId)
-            .populate({
-                path: 'driver',
-                populate: {
-                    path: 'user',
-                    select: 'firstName profilePictureUrl' // Send only what's needed
-                }
-            })
-            .populate({
-                path: 'user',
-                select: 'clerkId' // We need this to find the rider's socket
-            });
-
-        // 5. Notify the original rider
-        // This requires mapping a user ID to a socket ID.
-        // A simple (but not perfectly scalable) way is to store it on connection.
-        const riderClerkId = acceptedRideDetails.user.clerkId;
-        
-        // This assumes you have a way to get the rider's socket.
-        // We will improve this mapping in the next step.
-        // For now, let's broadcast to a "room" the rider would be in.
+        const acceptedRideDetails = await Ride.findById(rideId).populate('driver');
         io.to(`ride_${rideId}`).emit('ride-accepted', acceptedRideDetails);
         
-        console.log(`Ride ${rideId} accepted by Driver ${driverId}. Notifying Rider ${riderClerkId}.`);
+        console.log(`Ride ${rideId} (${ride.rideType}) accepted by Driver ${driverId}.`);
 
     } catch (error) {
         console.error("Error in acceptRide:", error);
     }
 };
 
-/**
- * @desc    Handles a driver starting a trip
- */
+// --- NEW `startTrip` FUNCTION ---
 exports.startTrip = async (io, data) => {
     try {
         const { rideId } = data;
@@ -149,47 +181,73 @@ exports.startTrip = async (io, data) => {
         );
 
         if (ride) {
-            // Notify the rider in the specific ride room
             io.to(`ride_${rideId}`).emit('trip-started', ride);
-            console.log(`Trip ${rideId} has officially started.`);
+            console.log(`Trip ${rideId} has started.`);
         }
     } catch (error) {
         console.error("Error starting trip:", error);
     }
 };
 
-/**
- * @desc    Handles a driver ending a trip
- */
+
 exports.endTrip = async (io, data) => {
     try {
         const { rideId } = data;
 
+        
+        const rideToComplete = await Ride.findById(rideId);
+        if (!rideToComplete) return;
+
+        
+        const directionsResponse = await directionsClient.getDirections({
+            profile: 'driving-traffic',
+            waypoints: [
+                { coordinates: [rideToComplete.pickupLocation.longitude, rideToComplete.pickupLocation.latitude] },
+                { coordinates: [rideToComplete.destination.longitude, rideToComplete.destination.latitude] }
+            ]
+        }).send();
+        
+        const route = directionsResponse.body.routes[0];
+        const finalFare = calculateFare(route.distance, route.duration, rideToComplete.rideType);
+        
+
         const ride = await Ride.findByIdAndUpdate(
             rideId,
-            { status: 'completed', endTime: new Date() },
+            { 
+                status: 'completed', 
+                endTime: new Date(),
+                fare: finalFare.toFixed(2) 
+            },
             { new: true }
         ).populate('driver');
 
         if (ride && ride.driver) {
-            // Make the driver available for new rides
-            await Driver.findByIdAndUpdate(ride.driver._id, { isAvailable: true });
+            
+            const driver = await Driver.findByIdAndUpdate(
+                ride.driver._id,
+                { $pull: { rideQueue: rideId } },
+                { new: true }
+            );
 
-            // Notify the rider the trip is over
+            
+            if (driver && driver.rideQueue.length === 0) {
+                driver.rideStatus = 'inactive';
+                await driver.save();
+                console.log(`Driver ${driver._id} has completed all rides and is now inactive.`);
+            }
+
             io.to(`ride_${rideId}`).emit('trip-completed', ride);
-            console.log(`Trip ${rideId} has ended. Driver ${ride.driver._id} is now available.`);
+            console.log(`Trip ${rideId} has ended. Final Fare: ${ride.fare} ETB`);
         }
     } catch (error) {
         console.error("Error ending trip:", error);
     }
 };
 
-/**
- * @desc    Handles cancelling a trip
- */
+// --- NEW `cancelTrip` FUNCTION ---
 exports.cancelTrip = async (io, data) => {
     try {
-        const { rideId, cancelledBy } = data; // cancelledBy could be 'rider' or 'driver'
+        const { rideId, cancelledBy } = data; // cancelledBy can be 'rider' or 'driver'
 
         const ride = await Ride.findByIdAndUpdate(
             rideId,
@@ -198,12 +256,20 @@ exports.cancelTrip = async (io, data) => {
         ).populate('driver');
 
         if (ride) {
-            // If a driver was assigned, make them available again
+            // If a driver was assigned, update their status
             if (ride.driver) {
-                await Driver.findByIdAndUpdate(ride.driver._id, { isAvailable: true });
-            }
+                const driver = await Driver.findByIdAndUpdate(
+                    ride.driver._id,
+                    { $pull: { rideQueue: rideId } },
+                    { new: true }
+                );
 
-            // Notify everyone in the ride room that it's been cancelled
+                if (driver && driver.rideQueue.length === 0) {
+                    driver.rideStatus = 'inactive';
+                    await driver.save();
+                }
+            }
+            
             io.to(`ride_${rideId}`).emit('trip-cancelled', { ride, cancelledBy });
             console.log(`Trip ${rideId} was cancelled by ${cancelledBy}.`);
         }

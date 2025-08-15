@@ -104,7 +104,6 @@ if (eventType === 'user.updated') {
     }
 }``
 
-    // You can also handle 'user.updated' and 'user.deleted' events here
 
     res.status(200).json({ success: true });
 });
