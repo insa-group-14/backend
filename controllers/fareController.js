@@ -5,10 +5,10 @@ const directionsClient = mbxDirections({ accessToken: MAPBOX_ACCESS_TOKEN });
 
 // --- PRICING CONSTANTS (in Ethiopian Birr - ETB) ---
 const BASE_FARE = 50;
-const PER_KILOMETER_RATE = 15;
+const PER_KILOMETER_RATE = 15; // for night 20
 const PER_MINUTE_RATE = 2;
 const MINIMUM_FARE = 100;
-const SHARED_RIDE_DISCOUNT = 0.40; // 20% discount
+const SHARED_RIDE_DISCOUNT = 0.40; // 40% discount
 
 /**
  * Calculates the fare based on distance, duration, and ride type.
@@ -18,7 +18,7 @@ const calculateFare = (distance, duration, rideType) => {
     const distanceInKm = distance / 1000;
     // duration is in seconds, convert to minutes
     const durationInMinutes = duration / 60;
-
+    
     let estimatedFare = BASE_FARE + (distanceInKm * PER_KILOMETER_RATE) + (durationInMinutes * PER_MINUTE_RATE);
 
     if (rideType === 'shared') {

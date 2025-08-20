@@ -49,3 +49,36 @@ exports.toggleDriverAvailability = async (req, res) => {
         res.status(500).json({ message: 'Server error.' });
     }
 };
+
+exports.becomeDriver = async (req, res) => {
+    try {
+        const user = await User.findOne({ clerkId: req.auth.userId });
+        if (!user) {
+            return res.status(404).json({ message: 'User not found.' });
+        }
+
+        // Prevent switching back or creating duplicate driver entries
+        if (user.userType === 'driver' && user.driverDetails) {
+            return res.status(400).json({ message: 'User is already a driver.' });
+        }
+
+        // Create a new Driver document
+        const newDriver = new Driver({
+            user: user._id,
+            // You can add default vehicle details here later
+        });
+        await newDriver.save();
+
+        // Update the User document
+        user.userType = 'driver';
+        user.driverDetails = newDriver._id;
+        await user.save();
+
+        console.log(`User ${user.firstName} is now a driver.`);
+        res.json({ message: 'Successfully registered as a driver!', user });
+
+    } catch (error) {
+        console.error("Error in becomeDriver:", error);
+        res.status(500).json({ message: 'Server error while becoming a driver.' });
+    }
+};

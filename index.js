@@ -1,6 +1,7 @@
 // index.js
 require('dotenv').config();
 const express = require('express');
+const cors = require('cors');
 const { ClerkExpressWithAuth } = require('@clerk/clerk-sdk-node');
 const connectDB = require('./config/db');
 const rideController = require("./controllers/rideController")
@@ -37,6 +38,7 @@ app.get('/', (req, res) => {
 });
 app.use('/api/webhooks/clerk', webhookRoutes);
 app.use(express.json());
+app.use(cors({ origin: 'http://localhost:3001' }));
 app.use(ClerkExpressWithAuth());
 
 // --- ADD THIS MIDDLEWARE ---
